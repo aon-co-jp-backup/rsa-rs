@@ -122,8 +122,8 @@ and the bignum arithmetic's constant-time property is delegated to `crypto-bigin
 fixtures contain throw-away test keys; Linux/WSL only.
 
 ### 追記 / Note (2026-11-04)
-* 上流 `rsa` には 0.10.0-rc.20 が既にある。互換層は `0.10.0-rc.18` を名乗るため、`russh`/`ssh-key` が rc.19 以降を要求するようになったら互換層の版を上げて再検証すること(`STATUS.md` で最新版を確認)。
-  Upstream already has `rsa` 0.10.0-rc.20; the compat layer claims rc.18, so bump and re-verify when dependents move to a newer rc.
+* 上流 `rsa` には 0.10.0 正式版(2026-11-19 時点で crates.io 確認、rc.19〜rc.22 も公開済み)が既にある。互換層は `0.10.0-rc.18` を名乗り、正式版との互換は未検証。、`russh`/`ssh-key` が rc.19 以降を要求するようになったら互換層の版を上げて再検証すること(`STATUS.md` で最新版を確認)。
+  Upstream already has `rsa` 0.10.0 final (checked on crates.io 2026-11-19; rc.19–rc.22 also exist). The compat layer claims rc.18 and compatibility with the final release is unverified, so bump and re-verify when dependents move to a newer rc.
 * 夜間/朝の自動更新: `scripts/nightly.sh`(手元 WSL・全試験)、`scripts/update-status.sh`(軽量・VPS 可)、VPS 用 timer 雛形は `deploy/`(未配置)。
 
 ## API 方針: REST 全廃・gRPC / Connect へ (2026-11-04)
