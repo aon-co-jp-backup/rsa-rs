@@ -13,11 +13,11 @@ cargo tree -i rsa -e all --target all
 ### 2. `Cargo.toml` に追加 (小さな別コミットで)
 ```toml
 [patch.crates-io]
-rsa = { path = "../rsa-rs/compat-0.10" }
-rsa-090 = { package = "rsa", path = "../rsa-rs/compat-0.9" }   # 0.9.x を引く場合のみ
+rsa = { git = "https://github.com/aon-co-jp/rsa-rs", tag = "v0.1.0", version = "=<ロックのrsa版>" }   # path = "../rsa-rs/compat-0.10" でも可
+rsa-090 = { package = "rsa", git = "https://github.com/aon-co-jp/rsa-rs", tag = "v0.1.0", version = "=0.9.10" }   # 0.9.x を引く場合のみ
 ```
 CI では `rsa-rs` を兄弟ディレクトリに checkout する (open-web-server の `open-cpu` と同じ方式)。
-`git = ` 指定にする場合は非公開リポジトリの認証が必要。
+`git = ` 指定は公開リポジトリなので認証は不要(path 指定でも可)。同じ repo に `rsa` が 2 つあるため `version = "=…"` が必須。
 
 ### 3. ロックの更新
 ```bash
@@ -44,13 +44,64 @@ cargo build && cargo test
 
 ## English
 
-1. Find who pulls `rsa`: `cargo tree -i rsa` (empty ⇒ lockfile-only). `sqlx-mysql` → `compat-0.9`; `russh`/`ssh-key` → `compat-0.10`.
-2. Add `[patch.crates-io]` entries (see above) in a small separate commit; check out `rsa-rs` as a sibling directory in CI.
-3. `cargo update -p crypto-bigint --precise 0.7.10`, then build and test.
-4. Acceptance: `cargo tree -i rsa` points at the compat path; verify signatures with `ssh-keygen -Y verify`.
-   Note that `cargo audit` silencing RUSTSEC-2023-0071 only means the registry crate is gone — read the README limitations.
-5. Differences from upstream: no PSS / PKCS#1 v1.5 encryption / multi-prime / serde / hazmat; blinding is always on.
-6. For new API: confirm the real call in the dependent's source → implement in `core/` from RFC 8017 → known-answer test → thin wrapper.
+How to use `rsa-rs` in another Rust project. Take it one step at a time.
+
+### 1. Find out who uses `rsa`
+
+```bash
+cargo tree -i rsa
+```
+
+* If the answer is empty, `rsa` is only written in `Cargo.lock` and is never built. You may still want to patch it, so scanners stop complaining.
+* `sqlx-mysql` uses `rsa` 0.9 → use `compat-0.9`.
+* `russh` and `ssh-key` use `rsa` 0.10 → use `compat-0.10`.
+
+### 2. Add a patch (in its own small commit)
+
+Add this to the project's `Cargo.toml`. Keep this change in a separate, small commit, so it is easy to undo.
+
+```toml
+[patch.crates-io]
+rsa = { git = "https://github.com/aon-co-jp/rsa-rs", tag = "v0.1.0", version = "=<the rsa version in your Cargo.lock>" }
+```
+
+Two things to know:
+
+* There are two crates called `rsa` inside this one repository. That is why the `version = "=…"` line is needed: it tells Cargo which one you mean. For `rsa` 0.9 you must also rename it, like `rsa-090 = { package = "rsa", git = …, version = "=0.9.10" }`.
+* You can also use a path to a local copy (`path = "../rsa-rs/compat-0.10"`). In CI, check `rsa-rs` out next to your project.
+
+### 3. Update the lock file
+
+```bash
+cargo update -p crypto-bigint --precise 0.7.10
+cargo build && cargo test
+```
+
+If Cargo says `failed to select a version for crypto-bigint`, run the first command and try again. `rsa-rs` needs `crypto-bigint` 0.7.10 or newer.
+
+### 4. Check that it worked
+
+* `cargo tree -i rsa` should now point to `rsa-rs`, not to crates.io.
+* If you sign things, check the result with `ssh-keygen -Y verify` (see `scripts/interop.sh`).
+* `cargo audit` should no longer show RUSTSEC-2023-0071. **Be careful:** the audit tool only ignores the replacement, because it is not from crates.io. That does not prove our code is safe. Read the limits in the README.
+* Compare test results before and after the patch. They should be the same.
+
+### 5. What is different from the real `rsa`?
+
+* No PSS, no PKCS#1 v1.5 encryption, no multi-prime keys, no serde, no `hazmat`. If you call them, it will not compile.
+* Blinding is always on, even if you give no random source.
+* Private keys with three or more primes are refused (`Error::InvalidPrime`).
+* `RsaPrivateKey::validate()` always says `Ok`, because the key is already checked when it is built.
+* `compat-0.9` has only public keys and OAEP encryption.
+
+### 6. What if I need a new function?
+
+1. Look at the real code of the project that calls it. Make sure it really needs the function.
+2. Write it in `core/`, following the right part of RFC 8017.
+3. Add a known-answer test (made with OpenSSL) or an interop test.
+4. Add a thin wrapper in the compat folder.
+
+Never guess. If you are not sure how something should behave, check the upstream docs, tests and source.
 
 ## API 方針: REST 全廃・gRPC / Connect へ (2026-11-04)
 

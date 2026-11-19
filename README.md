@@ -6,7 +6,7 @@
 > **実験的・第三者監査なし**(下の「限界」参照)。
 
 `rsa` クレートの **互換置き換え** (RUSTSEC-2023-0071 / Marvin Attack 対策)。aon-co-jp 配下のリポジトリが
-依存経由で使っている範囲だけを、RFC 8017 に基づき自前で実装したものです。非公開リポジトリ。crates.io には公開しません。
+依存経由で使っている範囲だけを、RFC 8017 に基づき自前で実装したものです。GitHub で公開していますが、crates.io には公開しません。
 
 > ⚠️ **第三者監査は受けていません。** 自前の暗号実装です。「定数時間性」「Marvin 非脆弱」を保証するものではありません。
 > 下の「限界」を必ず読んでください。
@@ -70,7 +70,7 @@ rsa-090 = { package = "rsa", path = "../rsa-rs/compat-0.9" }               # rsa
 | SSH 署名 ⇔ `ssh-keygen -Y verify` / `-Y sign` (rsa-sha2-256・512、生成鍵、改ざん検知) | 双方向 OK (`scripts/interop.sh`) |
 | `sqlx-mysql 0.8.6` を `compat-0.9` でビルド | OK (`scripts/sqlxmysql-check.sh`) |
 | `open-web-server` の別 clone で `sftp` (russh 0.63) 付きゲートウェイをビルド | OK (`scripts/owsrv-check.sh`) |
-| Wycheproof: RSA 署名検証 3 ファイル (valid/invalid 全件判定一致)、OAEP 復号 2 ファイル (Manger 系の不正パディングも全て拒否) | 全て pass (`core/tests/wycheproof.rs`) |
+| Wycheproof: RSA 署名検証 7 ファイル (valid/invalid 全件判定一致)、OAEP 復号 5 ファイル (Manger 系の不正パディングも全て拒否) | 全て pass (`core/tests/wycheproof.rs`) |
 | dudect 風の簡易タイミング計測 (OAEP 復号の正常/異常、RSADP の固定/ランダム入力) | \|t\| < 1 (n=1500/600)。下記の限界を参照 |
 
 ## 限界 (正直に)
@@ -96,33 +96,65 @@ MIT OR Apache-2.0。下は英語版の要約です。
 
 ## English
 
-A **drop-in replacement for the part of the `rsa` crate** that aon-co-jp projects reach through their dependencies,
-written from RFC 8017 to avoid RUSTSEC-2023-0071 (Marvin Attack; no fixed `rsa` release exists). Private repository; not published.
+### What is this?
 
-> ⚠️ **Not audited by any third party.** This is home-grown cryptography. Read "Limitations" before relying on it.
+`rsa-rs` is a small, home-made stand-in for part of the Rust `rsa` crate.
 
-* `core/` — hash/RNG-agnostic core: keys, RSADP (CRT + blinding + post-check), PKCS#1 v1.5 signatures, OAEP, key generation.
-* `compat-0.10/` — crate named `rsa` 0.10.0-rc.18, for `ssh-key 0.7.0-rc.11` / `russh`: signing, OAEP, PKCS#1/#8/SPKI.
-* `compat-0.9/` — crate named `rsa` 0.9.10, for `sqlx-mysql 0.8.x`: **public key + OAEP encryption only**.
+Why do we need it? The `rsa` crate has a known security bug called the **Marvin Attack** (RUSTSEC-2023-0071). An attacker who can measure tiny timing differences might learn a secret key. Nobody has released a fixed version of `rsa`. So we wrote the few pieces we really use, following the RFC 8017 standard, and we test them against OpenSSL and `ssh-keygen`.
 
-Use via `[patch.crates-io]` (see the Japanese section for the exact lines). `crypto-bigint >= 0.7.10` is required.
+> ⚠️ **Please read this first.** No outside expert has checked this code. It is home-made cryptography and it is **experimental**. We do **not** promise it is "constant-time" or "safe from Marvin". See "Limits" below.
 
-Not implemented (compile error if used): PSS, PKCS#1 v1.5 *encryption* (deliberately omitted), multi-prime keys, serde, `hazmat`.
+The code is public on GitHub. We do **not** publish it on crates.io.
 
-Defences: blinding on every private-key operation (OS RNG even when the caller passes none), CRT with a post-computation
-check `m'^e ≡ c'` (no result is released on mismatch), verification by re-encoding EM and comparing (no EM parsing),
-OAEP decoding with branch-free masks and a single error kind, zeroization on drop.
+### What is inside?
 
-Verified: byte-identical PKCS#1 v1.5 signatures vs OpenSSL, decryption of OpenSSL OAEP ciphertexts and vice-versa,
-`ssh-key`'s own test-suite against the replacement, `ssh-keygen -Y sign/verify` both ways, `sqlx-mysql 0.8.6` and an
-`open-web-server` clone (russh 0.63, `sftp`) build against the patch.
+| Folder | What it does |
+|---|---|
+| `core/` | The real RSA code. It does not care which version of the hash or random-number libraries you use. It has keys, signing, OAEP encryption and key generation. |
+| `compat-0.10/` | Looks like `rsa` 0.10.0-rc.18, so `ssh-key` and `russh` can use it. Signing, OAEP, key files. |
+| `compat-0.9/` | Looks like `rsa` 0.9.10, so `sqlx-mysql` can use it. **Only public keys and OAEP encryption.** No private-key work at all. |
+| `scripts/` | Test and "does it work with OpenSSL?" scripts. They run in WSL Ubuntu. |
 
-Limitations: no audit; constant-time behaviour only sampled with a crude t-test (|t| < 1) — **no instruction-level review was done**
-and the bignum arithmetic's constant-time property is delegated to `crypto-bigint` 0.7.10+; Wycheproof only for RSA-2048/3072 PKCS#1 v1.5 verify and OAEP-2048 decrypt;
-fixtures contain throw-away test keys; Linux/WSL only.
+### How do I use it?
+
+Add a `[patch.crates-io]` section to the `Cargo.toml` of the project that uses `rsa`. The exact lines are in the Japanese section above and in `PORTING.md`. You also need `crypto-bigint` version **0.7.10 or newer**.
+
+### What is NOT included?
+
+Only the functions that our projects really call are included. If your code calls something else, it will **not compile**. That is on purpose. A compile error is better than a hidden surprise.
+
+Missing on purpose or for now: PSS signatures, PKCS#1 v1.5 *encryption* (this one is left out on purpose, because it is the door that the Bleichenbacher and Marvin attacks use), keys with more than two primes, serde, and `hazmat`.
+
+### How does it protect secrets?
+
+* **Blinding.** Before every private-key calculation, we mix in a fresh random number. This makes timing tricks much harder. We do it even when the caller gives us no random source.
+* **CRT with a double check.** We use a faster math shortcut (CRT). Then we check the answer. If it is wrong, we give back nothing. This stops "fault attacks".
+* **Safe signature checking.** To check a signature, we rebuild what it should look like and compare the bytes. We never try to read the signature's inside.
+* **One error for OAEP.** When OAEP decryption fails, you always get the same single error. The checks use math masks instead of `if` branches.
+* **No tidy-up later.** Secret values are wiped from memory when they are dropped.
+
+### How did we test it?
+
+* Our signatures are **byte-for-byte the same** as OpenSSL's.
+* We can decrypt OpenSSL's OAEP messages, and OpenSSL can decrypt ours.
+* `ssh-key`'s own test suite passes when it uses our code instead of `rsa`.
+* `ssh-keygen -Y sign` and `-Y verify` work in both directions.
+* `sqlx-mysql 0.8.6` and an `open-web-server` copy (with `russh 0.63` and `sftp`) build with our code.
+* We ran the Wycheproof test vectors: 7 files for RSA signature checks and 5 files for OAEP. All pass.
+
+### Limits (we are honest about these)
+
+* **No outside check.** Nobody independent has reviewed this code.
+* **Timing is only sampled.** We ran a simple statistics test (|t| < 1). That only means "we saw no difference", not "there is none". **We have not read the machine code** to look for secret-dependent branches. The big-number math is trusted to `crypto-bigint` 0.7.10 or newer, and we have not checked it ourselves.
+* Wycheproof does not yet cover SHA-1 signatures, PSS, or other key sizes.
+* The `*.pem` files in `core/tests/fixtures/` are throw-away test keys. They are not secrets.
+* The length of a decrypted OAEP message can be seen by the caller. That is how the API works.
+* We only build on Linux (WSL Ubuntu). It needs the operating system's random numbers, so it is not for `no_std` or WASM.
+* The tests of `russh` itself were not run offline. We use the `ssh-key` tests and the `ssh-keygen` checks instead.
+* The private exponent `d` is `e⁻¹ mod φ(n)`, not `λ(n)`. It works and is compatible with OpenSSH and OpenSSL, but the number differs from what OpenSSL prints today.
 
 ### 追記 / Note (2026-11-04)
-* 上流 `rsa` には 0.10.0 正式版(2026-11-19 時点で crates.io 確認、rc.19〜rc.22 も公開済み)が既にある。互換層は `0.10.0-rc.18` を名乗り、正式版との互換は未検証。、`russh`/`ssh-key` が rc.19 以降を要求するようになったら互換層の版を上げて再検証すること(`STATUS.md` で最新版を確認)。
+* 上流 `rsa` には 0.10.0 正式版(2026-11-19 時点で crates.io 確認、rc.19〜rc.22 も公開済み)が既にある。互換層は `0.10.0-rc.18` を名乗り、正式版との互換は未検証。`russh`/`ssh-key` が rc.19 以降を要求するようになったら互換層の版を上げて再検証すること(`STATUS.md` で最新版を確認)。
   Upstream already has `rsa` 0.10.0 final (checked on crates.io 2026-11-19; rc.19–rc.22 also exist). The compat layer claims rc.18 and compatibility with the final release is unverified, so bump and re-verify when dependents move to a newer rc.
 * 夜間/朝の自動更新: `scripts/nightly.sh`(手元 WSL・全試験)、`scripts/update-status.sh`(軽量・VPS 可)、VPS 用 timer 雛形は `deploy/`(未配置)。
 

@@ -29,6 +29,28 @@ MSYS_NO_PATHCONV=1 wsl -d Ubuntu -- bash /mnt/f/rsa-rs/scripts/build.sh compat-0
 * `crypto-bigint` は `>=0.7.10`。下げない。
 * dependents 側の `[patch]` 追加は別の小さなコミットで。`cargo fmt --all` は禁止 (`cargo fmt -p` を使う)。
 
+## Working rules (English, plain and short)
+
+**What this repo is.** A home-made replacement for part of the `rsa` crate, built to avoid RUSTSEC-2023-0071. `README.md` is the main document. This file is only for people (and AI helpers) who work here.
+
+**Rules**
+* **Use RFC 8017 and known-answer tests as proof.** Do not guess. If you do not know how something should behave, check the upstream docs, tests or source.
+* **Build only what is really called.** Before you add an API, look at the calling project's source (`~/.cargo/registry/src/*/`) and confirm the call.
+* **Every crypto change needs a test.** Use a known answer made by OpenSSL, or an interop test with `ssh-keygen` or `openssl`.
+* **Never put secrets in logs or commits.** The `.pem` files in `core/tests/fixtures/` are throw-away test keys only.
+* **Going public is the owner's decision.** Never make the repo more public, and never publish to crates.io, on your own.
+* **Only claim what you checked.** Write "constant-time" or "safe" only for things you measured or confirmed. Write "unverified" for the rest, and keep the README limits up to date.
+
+**Build and test.** `cargo` is not on the Windows PATH. Run the scripts in WSL Ubuntu (the examples above show how). Use the `scripts/*.sh` files for interop checks. Do these checks in a working copy and never touch the original project's working tree.
+
+**Structure**
+* The two compat crates are both named `rsa`, so they must stay out of the workspace. Each has its own `[workspace]`.
+* `rsa-rs-core` does not depend on `digest` or `rand_core` versions. The compat crates handle the version differences.
+* `crypto-bigint` must stay `>=0.7.10`. Never lower it.
+* In a dependent project, add the `[patch]` in its own small commit. Never run `cargo fmt --all`; use `cargo fmt -p <crate>`.
+
+**Releases and servers.** Build on the WSL machine, never on the small VPS. Do not turn on timers or copy files to the VPS without the owner's OK.
+
 ## API 方針: REST 全廃・gRPC / Connect へ (2026-11-04)
 
 ### 日本語
